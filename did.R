@@ -1,3 +1,16 @@
+#' did.R
+#'
+#' Contributor: lachlandeer
+#'
+#' What this file does:
+#'    - Computes the Diff in Diff estimate by "hand" 
+#'       using the pre-post x treat-untreated means
+#'    - Diff in Diff via regression
+#'    - Introduced the fixest package for fixed effects in regression
+#'    - Clusters standard errors using fixest
+#'    - Event Study regression via fixest    
+
+# --- Libraries --- #
 library(readr)
 library(dplyr)
 library(modelsummary)
@@ -5,17 +18,34 @@ library(broom)
 library(ggplot2)
 library(fixest)
 
-
+# --- Load the Data --- #
 df <- 
   read_csv("data/app_data.csv") %>%
   mutate(post = if_else(month >= 19, 1, 0))  
 
+# --- The Diff-in-Diff Table --- #
 treat_table <-
   df %>%
   group_by(post, treat) %>%
   summarise(qty = mean(qty_purchases)) %>%
   ungroup()
 
+# --- "Eyeconometrics" of Diff in Diff --- #
+treat_table %>%
+    ggplot() +
+    geom_point(
+        aes(x = post,
+            y = qty,
+            color = as.factor(treat)
+            )
+        ) +
+    geom_line(aes(x = post,
+                  y = qty,
+                  color = as.factor(treat)
+                  )
+    )
+
+# --- Diff in Diff via the Treatment Table --- #
 treat_table %>%
   # makes treat and control group each on column
   tidyr::pivot_wider(names_from = treat,
@@ -26,57 +56,89 @@ treat_table %>%
   na.omit() %>%
   select(did_simple)
 
-m1 <- lm(qty_purchases ~  treat + post + treat:post + factor(month), data = df)
+# --- Diff in Diff as a Regression --- #
+did_simple <-
+    lm(qty_purchases ~  treat + post + treat:post, data = df)
 
-summary(m1)
+tidy(did_simple)    
 
-m2 <- feols(qty_purchases ~  treat + post + treat:post | month, 
+# --- Econometrics Redux --- #
+df %>%
+    group_by(treat, month) %>%
+    summarize(qty = mean(qty_purchases)) %>%
+    ggplot() +
+    geom_line(aes(x = month, 
+                  y = qty,
+                  color = as.factor(treat)
+                  )
+              ) + 
+    geom_vline(xintercept = 19, color = "red", linestyle = '--')
+
+# --- Add a Common monthly 'trend' to the data --- #
+model_monthly <- 
+    lm(qty_purchases ~  treat + post + treat:post + 
+           factor(month), 
+            data = df
+       )
+
+tidy(model_monthly)
+
+# Equivalent to
+model_month_fe <- 
+    feols(qty_purchases ~  treat + post + treat:post | month, 
             vcov = "iid",
-            data = df)
+            data = df
+          )
 
-summary(m2)
+tidy(model_month_fe)
 
-
+# is this a large effect?
 df %>%
-  filter(treatxpost == 1) %>%
-  summarise(min = max(month))
+    filter(post == 0) %>%
+    summarise(sd_qty = sd(qty_purchases))
 
+# --- Adding User Fixed effects --- #
+model_user_fe <- 
+    feols(qty_purchases ~  treat + post + treat:post | month + id, 
+          vcov = "iid",
+          data = df
+    )
 
-# parallel trends?
+tidy(model_user_fe)
 
-df %>%
-  group_by(treat, month) %>%
-  summarise(qty = mean(qty_purchases)) %>%
-  ggplot() + 
-  geom_line(aes(x = month, y = qty, color = as.factor(treat))) +
-  geom_vline(xintercept = 19, color = "red", linestyle = '--')
+# --- Heteroskedasticity Redux --- #
 
-# clustering, heterosk etc
-m2 <- feols(qty_purchases ~  treat + post + treat:post | month, 
-                 vcov = "HC1",
-                 data = df)
-summary(m2)
+model_hetero <-
+    feols(qty_purchases ~  treat + post + treat:post | month + id, 
+          vcov = "hetero",
+          data = df
+          )
 
+tidy(model_hetero)
 
-m2  <- feols(qty_purchases ~  treat + post + treat:post | month, 
-                 cluster = ~id,
-                 data = df)
+# --- Clustered Standard Errors --- #
+model_cluster_id  <- 
+    feols(qty_purchases ~  treat + post + treat:post | month + id, 
+          cluster = ~id,
+          data = df
+          )
 
-summary(m2)
+tidy(model_cluster_id)
 
-m2  <- feols(log(1+qty_purchases) ~  treat + post + treat:post + imr | month, 
-             cluster = ~id,
-             data = df)
+model_cluster_zip  <- 
+    feols(qty_purchases ~  treat + post + treat:post | month + id, 
+          cluster = ~zip,
+          data = df
+    )
 
-summary(m2)
+tidy(model_cluster_id)
 
-
-# eventstudy?
-m3 <- feols(frq_purchases ~  i(month, treat, 19) + imr | month, 
-            #vcov = "iid",
+# --- Is the Treatment Effect Constant Over Time --- #
+model_event <- 
+    feols(qty_purchases ~  i(month, treat, 19)  | month + id, 
             cluster = ~zip,
             data = df)
 
-summary(m3)
+tidy(model_event)
 
-iplot(m3)
+iplot(model_event)
