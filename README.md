@@ -1,7 +1,7 @@
 # Social Media and Web Analytics: Computing Lecture 1
 
 [![lifecycle](https://img.shields.io/badge/lifecycle-maturing-blue.svg)](https://www.tidyverse.org/lifecycle/#maturing)
-[![lifecycle](https://img.shields.io/badge/version-2022-red.svg)]()
+[![lifecycle](https://img.shields.io/badge/version-2023-red.svg)]()
 
 ## Learning Objectives
 
